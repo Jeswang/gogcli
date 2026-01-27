@@ -157,7 +157,7 @@ func TestGmailFilters_TextPaths(t *testing.T) {
 	}
 }
 
-func TestGmailFiltersExportImport(t *testing.T) {
+func TestGmailFiltersExportSync(t *testing.T) {
 	origNew := newGmailService
 	t.Cleanup(func() { newGmailService = origNew })
 
@@ -173,6 +173,10 @@ func TestGmailFiltersExportImport(t *testing.T) {
 		case strings.Contains(r.URL.Path, "/gmail/v1/users/me/settings/filters") && r.Method == http.MethodPost:
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": "fnew"})
+			return
+		case strings.Contains(r.URL.Path, "/gmail/v1/users/me/settings/filters/") && r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+			return
 		default:
 			http.NotFound(w, r)
 		}
@@ -202,10 +206,10 @@ func TestGmailFiltersExportImport(t *testing.T) {
 			t.Fatalf("export: %v", err)
 		}
 
-		// Test Import
-		importCmd := &GmailFiltersImportCmd{In: tmpFile}
-		if err := runKong(t, importCmd, []string{"--in", tmpFile}, ctx, flags); err != nil {
-			t.Fatalf("import: %v", err)
+		// Test Sync
+		syncCmd := &GmailFiltersSyncCmd{In: tmpFile}
+		if err := runKong(t, syncCmd, []string{"--in", tmpFile}, ctx, flags); err != nil {
+			t.Fatalf("sync: %v", err)
 		}
 	})
 }
