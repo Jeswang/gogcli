@@ -157,6 +157,59 @@ func TestGmailFilters_TextPaths(t *testing.T) {
 	}
 }
 
+func TestGmailFiltersExportImport(t *testing.T) {
+	origNew := newGmailService
+	t.Cleanup(func() { newGmailService = origNew })
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/gmail/v1/users/me/settings/filters") && r.Method == http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"filter": []map[string]any{
+					{"id": "f1", "criteria": map[string]any{"from": "a@example.com"}},
+				},
+			})
+		case strings.Contains(r.URL.Path, "/gmail/v1/users/me/settings/filters") && r.Method == http.MethodPost:
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "fnew"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	svc, err := gmail.NewService(context.Background(),
+		option.WithoutAuthentication(),
+		option.WithHTTPClient(srv.Client()),
+		option.WithEndpoint(srv.URL+"/"),
+	)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	newGmailService = func(context.Context, string) (*gmail.Service, error) { return svc, nil }
+
+	flags := &RootFlags{Account: "a@b.com"}
+	tmpFile := t.TempDir() + "/filters.json"
+
+	_ = captureStdout(t, func() {
+		u, _ := ui.New(ui.Options{Stdout: io.Discard, Stderr: io.Discard, Color: "never"})
+		ctx := ui.WithUI(context.Background(), u)
+
+		// Test Export
+		exportCmd := &GmailFiltersExportCmd{Out: tmpFile}
+		if err := runKong(t, exportCmd, []string{"--out", tmpFile}, ctx, flags); err != nil {
+			t.Fatalf("export: %v", err)
+		}
+
+		// Test Import
+		importCmd := &GmailFiltersImportCmd{In: tmpFile}
+		if err := runKong(t, importCmd, []string{"--in", tmpFile}, ctx, flags); err != nil {
+			t.Fatalf("import: %v", err)
+		}
+	})
+}
+
 func TestGmailFiltersList_NoFilters(t *testing.T) {
 	origNew := newGmailService
 	t.Cleanup(func() { newGmailService = origNew })

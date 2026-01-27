@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -19,6 +20,8 @@ type GmailFiltersCmd struct {
 	Get    GmailFiltersGetCmd    `cmd:"" name:"get" help:"Get a specific filter"`
 	Create GmailFiltersCreateCmd `cmd:"" name:"create" help:"Create a new email filter"`
 	Delete GmailFiltersDeleteCmd `cmd:"" name:"delete" help:"Delete a filter"`
+	Export GmailFiltersExportCmd `cmd:"" name:"export" help:"Export all filters to a file"`
+	Import GmailFiltersImportCmd `cmd:"" name:"import" help:"Import filters from a file"`
 }
 
 type GmailFiltersListCmd struct{}
@@ -349,5 +352,79 @@ func (c *GmailFiltersDeleteCmd) Run(ctx context.Context, flags *RootFlags) error
 	}
 
 	u.Out().Printf("Filter %s deleted successfully", filterID)
+	return nil
+}
+
+type GmailFiltersExportCmd struct {
+	Out string `name:"out" short:"o" help:"Output file path (JSON)"`
+}
+
+func (c *GmailFiltersExportCmd) Run(ctx context.Context, flags *RootFlags) error {
+	account, err := requireAccount(flags)
+	if err != nil {
+		return err
+	}
+
+	svc, err := newGmailService(ctx, account)
+	if err != nil {
+		return err
+	}
+
+	resp, err := svc.Users.Settings.Filters.List("me").Do()
+	if err != nil {
+		return err
+	}
+
+	if c.Out != "" {
+		f, err := os.Create(c.Out)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		return outfmt.WriteJSON(f, map[string]any{"filters": resp.Filter})
+	}
+
+	return outfmt.WriteJSON(os.Stdout, map[string]any{"filters": resp.Filter})
+}
+
+type GmailFiltersImportCmd struct {
+	In string `name:"in" short:"i" required:"" help:"Input file path (JSON)"`
+}
+
+func (c *GmailFiltersImportCmd) Run(ctx context.Context, flags *RootFlags) error {
+	u := ui.FromContext(ctx)
+	account, err := requireAccount(flags)
+	if err != nil {
+		return err
+	}
+
+	svc, err := newGmailService(ctx, account)
+	if err != nil {
+		return err
+	}
+
+	data, err := os.ReadFile(c.In)
+	if err != nil {
+		return err
+	}
+
+	var input struct {
+		Filters []*gmail.Filter `json:"filters"`
+	}
+	if err := json.Unmarshal(data, &input); err != nil {
+		return err
+	}
+
+	for _, f := range input.Filters {
+		// Clear ID to ensure creation
+		f.Id = ""
+		_, err := svc.Users.Settings.Filters.Create("me", f).Do()
+		if err != nil {
+			u.Err().Printf("Failed to create filter: %v\n", err)
+			continue
+		}
+		u.Out().Printf("Created filter: %v\n", f.Criteria)
+	}
+
 	return nil
 }
